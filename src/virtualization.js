@@ -160,6 +160,206 @@
   }
 
   // ---------------------------------------------------------------------------
+  // Streaming detection helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Detect if ChatGPT is currently streaming a response.
+   * Uses multiple heuristics to robustly detect streaming state.
+   *
+   * @returns {boolean}
+   */
+  function detectStreamingState() {
+    // Method 1: Check for "Stop generating" button
+    const stopButton = document.querySelector(
+      'button[aria-label*="Stop" i], button[data-testid*="stop" i], button:has(svg[data-icon="stop"])'
+    );
+    if (stopButton && stopButton.offsetParent !== null) {
+      log("Streaming detected: Stop button found");
+      return true;
+    }
+
+    // Method 2: Check for buttons with "Stop" text content
+    const buttons = document.querySelectorAll('button');
+    for (const btn of buttons) {
+      const text = btn.textContent || '';
+      if (text.toLowerCase().includes('stop') && 
+          (text.toLowerCase().includes('generat') || text.toLowerCase().includes('streaming'))) {
+        if (btn.offsetParent !== null) {
+          log("Streaming detected: Stop generating button found");
+          return true;
+        }
+      }
+    }
+
+    // Method 3: Check for streaming cursor/indicator in the last message
+    const messages = document.querySelectorAll(config.ARTICLE_SELECTOR);
+    if (messages.length > 0) {
+      const lastMessage = messages[messages.length - 1];
+      
+      // Look for common streaming indicators
+      const streamingIndicators = [
+        '[class*="cursor"]',
+        '[class*="streaming"]',
+        '[class*="typing"]',
+        '[data-streaming="true"]',
+        '.result-streaming'
+      ];
+      
+      for (const selector of streamingIndicators) {
+        if (lastMessage.querySelector(selector)) {
+          log("Streaming detected: Streaming indicator found");
+          return true;
+        }
+      }
+    }
+
+    return false;
+  }
+
+  /**
+   * Get the currently streaming message element, if any.
+   *
+   * @returns {HTMLElement | null}
+   */
+  function getStreamingMessageElement() {
+    const messages = document.querySelectorAll(config.ARTICLE_SELECTOR);
+    if (messages.length === 0) return null;
+
+    // The streaming message is typically the last assistant message
+    const lastMessage = messages[messages.length - 1];
+    
+    // Verify it's an assistant message (usually even-numbered turns, or check for assistant markers)
+    const isAssistant = lastMessage.querySelector('[data-message-author-role="assistant"]') ||
+                        lastMessage.getAttribute('data-testid')?.includes('-') ||
+                        true; // fallback: treat last message as streaming candidate
+
+    if (isAssistant && lastMessage instanceof HTMLElement) {
+      return lastMessage;
+    }
+
+    return null;
+  }
+
+  /**
+   * Get messages that should be pinned during streaming.
+   * Returns virtual IDs of messages that must remain mounted.
+   *
+   * @returns {Set<string>}
+   */
+  function getPinnedMessageIds() {
+    const pinnedIds = new Set();
+    
+    if (!state.isStreaming) {
+      return pinnedIds;
+    }
+
+    const messages = document.querySelectorAll(
+      `${config.ARTICLE_SELECTOR}, div[data-chatgpt-virtual-spacer="1"]`
+    );
+    
+    if (messages.length === 0) return pinnedIds;
+
+    // Find indices of messages to pin
+    const totalMessages = messages.length;
+    const bufferCount = config.STREAMING_BUFFER_MESSAGES;
+    
+    // Pin the last N messages (streaming message + preceding context)
+    const pinStartIndex = Math.max(0, totalMessages - bufferCount - 1);
+    
+    for (let i = pinStartIndex; i < totalMessages; i++) {
+      const msg = messages[i];
+      if (msg instanceof HTMLElement && msg.dataset.virtualId) {
+        pinnedIds.add(msg.dataset.virtualId);
+      }
+    }
+
+    log(`Pinning ${pinnedIds.size} messages during streaming`);
+    return pinnedIds;
+  }
+
+  /**
+   * Update streaming state and pinned messages.
+   */
+  function updateStreamingState() {
+    const wasStreaming = state.isStreaming;
+    state.isStreaming = detectStreamingState();
+    
+    if (state.isStreaming !== wasStreaming) {
+      log(`Streaming state changed: ${wasStreaming} → ${state.isStreaming}`);
+    }
+
+    if (state.isStreaming) {
+      state.pinnedMessageIds = getPinnedMessageIds();
+      
+      // Track the streaming message for resize observation
+      const streamingMsg = getStreamingMessageElement();
+      if (streamingMsg !== state.currentStreamingMessage) {
+        // Update resize observer target
+        if (state.resizeObserver && state.currentStreamingMessage) {
+          state.resizeObserver.unobserve(state.currentStreamingMessage);
+        }
+        state.currentStreamingMessage = streamingMsg;
+        if (state.resizeObserver && streamingMsg) {
+          state.resizeObserver.observe(streamingMsg);
+        }
+      }
+    } else {
+      state.pinnedMessageIds.clear();
+      if (state.resizeObserver && state.currentStreamingMessage) {
+        state.resizeObserver.unobserve(state.currentStreamingMessage);
+      }
+      state.currentStreamingMessage = null;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Scroll position helpers
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Check if the user is at or near the bottom of the scroll container.
+   *
+   * @returns {boolean}
+   */
+  function checkIsUserAtBottom() {
+    const scrollEl = state.scrollElement;
+    if (!scrollEl) return true;
+
+    let scrollTop, scrollHeight, clientHeight;
+
+    if (scrollEl === window || scrollEl === document.documentElement || scrollEl === document.body) {
+      scrollTop = window.scrollY || document.documentElement.scrollTop;
+      scrollHeight = document.documentElement.scrollHeight;
+      clientHeight = window.innerHeight;
+    } else if (scrollEl instanceof HTMLElement) {
+      scrollTop = scrollEl.scrollTop;
+      scrollHeight = scrollEl.scrollHeight;
+      clientHeight = scrollEl.clientHeight;
+    } else {
+      return true;
+    }
+
+    const distanceFromBottom = scrollHeight - (scrollTop + clientHeight);
+    return distanceFromBottom < config.BOTTOM_THRESHOLD_PX;
+  }
+
+  /**
+   * Scroll to bottom of the container if user was at bottom.
+   */
+  function maintainBottomAnchor() {
+    if (!state.isUserAtBottom || !state.scrollElement) return;
+
+    const scrollEl = state.scrollElement;
+
+    if (scrollEl === window || scrollEl === document.documentElement || scrollEl === document.body) {
+      window.scrollTo(0, document.documentElement.scrollHeight);
+    } else if (scrollEl instanceof HTMLElement) {
+      scrollEl.scrollTop = scrollEl.scrollHeight;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Core virtualization helpers
   // ---------------------------------------------------------------------------
 
@@ -209,6 +409,12 @@
     const id = articleElement.dataset.virtualId;
     if (!id || !articleElement.isConnected) return;
 
+    // Never unmount pinned messages
+    if (state.pinnedMessageIds.has(id)) {
+      log(`Skipping virtualization of pinned message: ${id}`);
+      return;
+    }
+
     const rect = articleElement.getBoundingClientRect();
     const height = rect.height || 24;
 
@@ -253,8 +459,22 @@
     state.stats.renderedMessages = rendered;
   }
 
-  function virtualizeNow() {
+  /**
+   * Core virtualization pass - runs the actual virtualization logic.
+   *
+   * @param {string} reason - Reason for this virtualization run (for debugging)
+   */
+  function runVirtualize(reason) {
     if (!state.enabled) return;
+
+    state.lastVirtualizeTime = performance.now();
+    
+    // Update streaming state before virtualization
+    updateStreamingState();
+    
+    // Track scroll position before changes
+    const wasAtBottom = checkIsUserAtBottom();
+    state.isUserAtBottom = wasAtBottom;
 
     ensureVirtualIds();
 
@@ -270,6 +490,17 @@
 
     nodes.forEach((node) => {
       if (!(node instanceof HTMLElement)) return;
+
+      const id = node.dataset.virtualId;
+      
+      // Skip pinned messages entirely
+      if (id && state.pinnedMessageIds.has(id)) {
+        // If it's a spacer, restore it
+        if (node.dataset.chatgptVirtualSpacer === "1") {
+          convertSpacerToArticle(node);
+        }
+        return;
+      }
 
       const rect = node.getBoundingClientRect();
       const relativeTop = rect.top - viewport.top;
@@ -287,8 +518,14 @@
     });
 
     updateStats();
+    
+    // Maintain bottom anchor if user was at bottom
+    if (wasAtBottom && state.isStreaming) {
+      maintainBottomAnchor();
+    }
+    
     log(
-      `virtualize: total=${state.stats.totalMessages}, rendered=${state.stats.renderedMessages}`
+      `virtualize (${reason}): total=${state.stats.totalMessages}, rendered=${state.stats.renderedMessages}, streaming=${state.isStreaming}, pinned=${state.pinnedMessageIds.size}`
     );
 
     // Show activation badge only once per chat,
@@ -302,14 +539,40 @@
     }
   }
 
-  function scheduleVirtualization() {
-    if (state.requestAnimationScheduled) return;
-    state.requestAnimationScheduled = true;
+  /**
+   * Schedule a virtualization run with throttling.
+   * Uses requestAnimationFrame + time-based throttling during streaming.
+   *
+   * @param {string} reason - Reason for scheduling (for debugging)
+   */
+  function scheduleVirtualization(reason = "unknown") {
+    if (state.virtualizePending) return;
+    state.virtualizePending = true;
 
     requestAnimationFrame(() => {
-      state.requestAnimationScheduled = false;
-      virtualizeNow();
+      state.virtualizePending = false;
+      
+      const now = performance.now();
+      const timeSinceLastRun = now - state.lastVirtualizeTime;
+      
+      // During streaming, enforce stricter throttling to avoid thrashing
+      const throttleMs = state.isStreaming ? config.STREAMING_THROTTLE_MS : 0;
+      
+      if (timeSinceLastRun < throttleMs) {
+        // Schedule for later
+        setTimeout(() => {
+          runVirtualize(reason);
+        }, throttleMs - timeSinceLastRun);
+        return;
+      }
+      
+      runVirtualize(reason);
     });
+  }
+
+  // Legacy function for backwards compatibility
+  function virtualizeNow() {
+    runVirtualize("direct");
   }
 
   function getStatsSnapshot() {
@@ -322,7 +585,9 @@
     return {
       totalMessages,
       renderedMessages,
-      memorySavedPercent: saved
+      memorySavedPercent: saved,
+      isStreaming: state.isStreaming,
+      pinnedCount: state.pinnedMessageIds.size
     };
   }
 
@@ -343,6 +608,10 @@
       const currentTime = now();
       if (currentTime - lastCheckTime < config.SCROLL_THROTTLE_MS) return;
       lastCheckTime = currentTime;
+      
+      // Update bottom anchor state on scroll
+      state.isUserAtBottom = checkIsUserAtBottom();
+      
       onScrollChange();
     };
 
@@ -375,6 +644,20 @@
     });
   }
 
+  /**
+   * Setup ResizeObserver for tracking streaming message height changes.
+   */
+  function setupResizeObserver() {
+    if (state.resizeObserver) {
+      state.resizeObserver.disconnect();
+    }
+
+    state.resizeObserver = new ResizeObserver((entries) => {
+      // Throttle resize-driven virtualization
+      scheduleVirtualization("resize");
+    });
+  }
+
   // ---------------------------------------------------------------------------
   // Main: boot, teardown, URL watcher
   // ---------------------------------------------------------------------------
@@ -396,7 +679,7 @@
 
     state.scrollElement = container;
     state.cleanupScrollListener = setupScrollTracking(container, () => {
-      scheduleVirtualization();
+      scheduleVirtualization("scroll");
     });
 
     log(
@@ -408,7 +691,7 @@
   }
 
   function handleResize() {
-    scheduleVirtualization();
+    scheduleVirtualization("window-resize");
   }
 
   function bootVirtualizer() {
@@ -420,9 +703,12 @@
     const root = findConversationRoot();
     state.conversationRoot = root;
 
+    // Setup resize observer for streaming message height tracking
+    setupResizeObserver();
+
     const mutationObserver = createDebouncedObserver(() => {
       attachOrUpdateScrollListener();
-      scheduleVirtualization();
+      scheduleVirtualization("mutation");
     }, config.MUTATION_DEBOUNCE_MS);
 
     mutationObserver.observe(root, { childList: true, subtree: true });
@@ -434,12 +720,16 @@
 
     // Ensure we start tracking even if messages already exist
     attachOrUpdateScrollListener();
-    scheduleVirtualization();
+    scheduleVirtualization("boot");
   }
 
   function teardownVirtualizer() {
     if (state.observer) state.observer.disconnect();
     if (state.cleanupScrollListener) state.cleanupScrollListener();
+    if (state.resizeObserver) {
+      state.resizeObserver.disconnect();
+      state.resizeObserver = null;
+    }
 
     state.scrollElement = null;
     state.observer = null;
@@ -448,6 +738,14 @@
 
     state.articleMap.clear();
     state.nextVirtualId = 1;
+    
+    // Reset streaming state
+    state.isStreaming = false;
+    state.pinnedMessageIds.clear();
+    state.currentStreamingMessage = null;
+    state.lastVirtualizeTime = 0;
+    state.virtualizePending = false;
+    state.isUserAtBottom = true;
 
     hasShownBadgeForCurrentChat = false;
 
