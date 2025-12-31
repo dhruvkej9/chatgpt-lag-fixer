@@ -182,9 +182,9 @@
     // Method 2: Check for buttons with "Stop" text content
     const buttons = document.querySelectorAll('button');
     for (const btn of buttons) {
-      const text = btn.textContent || '';
-      if (text.toLowerCase().includes('stop') && 
-          (text.toLowerCase().includes('generat') || text.toLowerCase().includes('streaming'))) {
+      const textLower = (btn.textContent || '').toLowerCase();
+      if (textLower.includes('stop') && 
+          (textLower.includes('generat') || textLower.includes('streaming'))) {
         if (btn.offsetParent !== null) {
           log("Streaming detected: Stop generating button found");
           return true;
@@ -219,6 +219,8 @@
 
   /**
    * Get the currently streaming message element, if any.
+   * Falls back to treating the last message as the streaming candidate 
+   * since ChatGPT's DOM structure doesn't always have clear assistant markers.
    *
    * @returns {HTMLElement | null}
    */
@@ -226,15 +228,10 @@
     const messages = document.querySelectorAll(config.ARTICLE_SELECTOR);
     if (messages.length === 0) return null;
 
-    // The streaming message is typically the last assistant message
+    // The streaming message is typically the last message during active streaming
     const lastMessage = messages[messages.length - 1];
     
-    // Verify it's an assistant message (usually even-numbered turns, or check for assistant markers)
-    const isAssistant = lastMessage.querySelector('[data-message-author-role="assistant"]') ||
-                        lastMessage.getAttribute('data-testid')?.includes('-') ||
-                        true; // fallback: treat last message as streaming candidate
-
-    if (isAssistant && lastMessage instanceof HTMLElement) {
+    if (lastMessage instanceof HTMLElement) {
       return lastMessage;
     }
 
@@ -559,8 +556,13 @@
       const throttleMs = state.isStreaming ? config.STREAMING_THROTTLE_MS : 0;
       
       if (timeSinceLastRun < throttleMs) {
+        // Clear any existing timeout to prevent multiple scheduled runs
+        if (state.virtualizeTimeoutId !== null) {
+          clearTimeout(state.virtualizeTimeoutId);
+        }
         // Schedule for later
-        setTimeout(() => {
+        state.virtualizeTimeoutId = setTimeout(() => {
+          state.virtualizeTimeoutId = null;
           runVirtualize(reason);
         }, throttleMs - timeSinceLastRun);
         return;
@@ -570,7 +572,11 @@
     });
   }
 
-  // Legacy function for backwards compatibility
+  /**
+   * Run virtualization immediately. Used for backwards compatibility with 
+   * any code that relied on the old synchronous behavior.
+   * @deprecated Use scheduleVirtualization() instead for proper throttling.
+   */
   function virtualizeNow() {
     runVirtualize("direct");
   }
@@ -746,6 +752,12 @@
     state.lastVirtualizeTime = 0;
     state.virtualizePending = false;
     state.isUserAtBottom = true;
+    
+    // Clear any pending timeout
+    if (state.virtualizeTimeoutId !== null) {
+      clearTimeout(state.virtualizeTimeoutId);
+      state.virtualizeTimeoutId = null;
+    }
 
     hasShownBadgeForCurrentChat = false;
 

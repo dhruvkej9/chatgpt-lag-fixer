@@ -48,7 +48,6 @@ window.ChatGPTVirtualScroller = window.ChatGPTVirtualScroller || {};
     articleMap: new Map(),
     enabled: true,
     debug: false,
-    requestAnimationScheduled: false,
 
     /** @type {HTMLElement | Window | null} */
     scrollElement: null,
@@ -77,6 +76,8 @@ window.ChatGPTVirtualScroller = window.ChatGPTVirtualScroller || {};
     lastVirtualizeTime: 0,
     /** @type {boolean} - Whether a virtualization is pending */
     virtualizePending: false,
+    /** @type {number | null} - Timeout ID for scheduled virtualization */
+    virtualizeTimeoutId: null,
     /** @type {boolean} - Whether user is pinned to bottom */
     isUserAtBottom: true,
     /** @type {ResizeObserver | null} */
