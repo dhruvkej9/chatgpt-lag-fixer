@@ -96,5 +96,14 @@ function updateStatsUI() {
   });
 }
 
+  // Initial update
   updateStatsUI();
+  
+  // Poll for real-time updates while popup is open (1 second interval)
+  const statsInterval = setInterval(updateStatsUI, 1000);
+  
+  // Clean up interval when popup closes
+  window.addEventListener("beforeunload", () => {
+    clearInterval(statsInterval);
+  });
 });
