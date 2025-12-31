@@ -3,6 +3,8 @@ document.addEventListener("DOMContentLoaded", () => {
   const renderedMessagesElement = document.getElementById("statRenderedMessages");
   const memorySavedElement = document.getElementById("statMemorySaved");
   const statusElement = document.getElementById("statStatus");
+  const streamingElement = document.getElementById("statStreaming");
+  const pinnedElement = document.getElementById("statPinned");
 
   const toggleEnabledElement = document.getElementById("toggleEnabled");
   const toggleDebugElement = document.getElementById("toggleDebug");
@@ -53,6 +55,8 @@ function updateStatsUI() {
       totalMessagesElement.textContent = "0";
       renderedMessagesElement.textContent = "0";
       memorySavedElement.textContent = "0%";
+      streamingElement.textContent = "No";
+      pinnedElement.textContent = "0";
       updateStatusText(false);
       return;
     }
@@ -75,17 +79,31 @@ function updateStatsUI() {
           totalMessages,
           renderedMessages,
           memorySavedPercent,
-          enabled
+          enabled,
+          isStreaming,
+          pinnedCount
         } = response;
 
         totalMessagesElement.textContent = String(totalMessages);
         renderedMessagesElement.textContent = String(renderedMessages);
         memorySavedElement.textContent = `${memorySavedPercent}%`;
+        streamingElement.textContent = isStreaming ? "Yes" : "No";
+        streamingElement.classList.toggle("status-streaming", isStreaming);
+        pinnedElement.textContent = String(pinnedCount || 0);
         updateStatusText(enabled);
       }
     );
   });
 }
 
+  // Initial update
   updateStatsUI();
+  
+  // Poll for real-time updates while popup is open (1 second interval)
+  const statsInterval = setInterval(updateStatsUI, 1000);
+  
+  // Clean up interval when popup closes
+  window.addEventListener("beforeunload", () => {
+    clearInterval(statsInterval);
+  });
 });
