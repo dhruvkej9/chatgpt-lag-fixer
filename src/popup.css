@@ -77,6 +77,20 @@ body {
   color: #4c6fff;
 }
 
+.stat-value.status-disabled {
+  color: #e74c3c;
+}
+
+.stat-value.status-streaming {
+  color: #f39c12;
+  animation: pulse 1.5s ease-in-out infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+
 .settings-card {
   background: white;
   border-radius: 12px;

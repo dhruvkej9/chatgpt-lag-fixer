@@ -59,6 +59,8 @@
       renderedMessages: statsSnapshot.renderedMessages,
       memorySavedPercent: statsSnapshot.memorySavedPercent,
       enabled: state.enabled,
+      isStreaming: statsSnapshot.isStreaming,
+      pinnedCount: statsSnapshot.pinnedCount
     });
     return true;
   });

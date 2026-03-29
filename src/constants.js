@@ -26,7 +26,16 @@ window.ChatGPTVirtualScroller = window.ChatGPTVirtualScroller || {};
     SCROLL_THROTTLE_MS: 50,
 
     /** Debounce time for DOM mutation bursts, in ms */
-    MUTATION_DEBOUNCE_MS: 50
+    MUTATION_DEBOUNCE_MS: 50,
+
+    /** Minimum interval for virtualization runs during streaming, in ms */
+    STREAMING_THROTTLE_MS: 150,
+
+    /** Number of extra messages to keep mounted as safety buffer before streaming message */
+    STREAMING_BUFFER_MESSAGES: 2,
+
+    /** Threshold in pixels to consider user "at bottom" for auto-scroll anchoring */
+    BOTTOM_THRESHOLD_PX: 24
   };
 
   /**
@@ -39,7 +48,6 @@ window.ChatGPTVirtualScroller = window.ChatGPTVirtualScroller || {};
     articleMap: new Map(),
     enabled: true,
     debug: false,
-    requestAnimationScheduled: false,
 
     /** @type {HTMLElement | Window | null} */
     scrollElement: null,
@@ -57,7 +65,25 @@ window.ChatGPTVirtualScroller = window.ChatGPTVirtualScroller || {};
     },
 
     /** "IDLE" | "OBSERVING" */
-    lifecycleStatus: /** @type {"IDLE" | "OBSERVING"} */ ("IDLE")
+    lifecycleStatus: /** @type {"IDLE" | "OBSERVING"} */ ("IDLE"),
+
+    // Streaming-related state
+    /** @type {boolean} */
+    isStreaming: false,
+    /** @type {Set<string>} - Virtual IDs of pinned messages */
+    pinnedMessageIds: new Set(),
+    /** @type {number} - Timestamp of last virtualization run */
+    lastVirtualizeTime: 0,
+    /** @type {boolean} - Whether a virtualization is pending */
+    virtualizePending: false,
+    /** @type {number | null} - Timeout ID for scheduled virtualization */
+    virtualizeTimeoutId: null,
+    /** @type {boolean} - Whether user is pinned to bottom */
+    isUserAtBottom: true,
+    /** @type {ResizeObserver | null} */
+    resizeObserver: null,
+    /** @type {HTMLElement | null} */
+    currentStreamingMessage: null
   };
 
   /**
